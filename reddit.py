@@ -1,9 +1,5 @@
-from datetime import datetime
-import pyscreenshot as ImageGrab
 from collections import namedtuple
 import praw
-import time
-import sys
 import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -11,6 +7,9 @@ from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.firefox.options import Options as Firefox_Options
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+import pyttsx3
+
+from moviepy.editor import VideoFileClip, ImageClip, concatenate_videoclips, concatenate_audioclips, CompositeVideoClip, AudioFileClip, CompositeAudioClip
 
 firefox_options = Firefox_Options()
 s = Service('chromedriver/geckodriver')
@@ -19,55 +18,71 @@ s = Service('chromedriver/geckodriver')
 RedditPost = namedtuple("RedditPost", ["title", "url", "id", "comments"])
 Comment = namedtuple("Comment", ["text", "id","url"])
 
-def main():
-    list_of_posts = praw_script('askreddit',1,4)
-    take_screenshot(list_of_posts)
 
-def take_screenshot(posts):
+def textToSpeech(text, path, id):
+    engine = pyttsx3.init()
+    engine.save_to_file(text , f"{path}\\{id}.mp3")
+    engine.runAndWait()
+
+def getTitle(origTitle):
+    uneditedTitle = "_".join(origTitle.split(" "))
+    title = ""
+    for c in uneditedTitle:
+        if c not in "?*\"\'":
+            title+=(c)
+    del uneditedTitle
+    return title
+
+def collect_screenshots_and_audio_files(posts):
     print("COLLECTING SCREENHOTS\n")
-    for post in posts:
-        uneditedTitle = "_".join(post.title.split(" "))
-        title = ""
-        for c in uneditedTitle:
-            if c not in "?*\"\'":
-                title+=(c)
-        del uneditedTitle
 
+    for post in posts:
+
+        #### remove spaces and punctuation from post title
+        title = getTitle(post.title)
+
+        #### open the driver
         driver = webdriver.Firefox(service=s, options=firefox_options)
         driver.get(post.url)
-        
+
+        #### find the html area of the post title
         title_html = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.XPATH, f"//*[@id=\"t3_{post.id}\"]")))
 
+        #### create a folder for all media for current post 
         path = f"C:\\Users\\vedan\\OneDrive\\Documents\\Python\\Automated_Content_Generator\\{title}"
-
         if not os.path.isdir(path):
             os.mkdir(path)
 
+        #### take screenshot of post title
         title_html.screenshot(f"{path}\\{post.id}.png")
         driver.close()
 
+        #### generate the text-to-speech file of the post title
+        textToSpeech(post.title, path, post.id)
         
-        comments_folder_path = f"{path}\\{post.id}_screenshots"
 
+        #### COMMENTS
+        #### create folder within post file to store all comments-related media
+        comments_folder_path = f"{path}\\{post.id}_screenshots"
         if not os.path.isdir(comments_folder_path):
             os.mkdir(comments_folder_path)
         
         for comment in post.comments:
+            # open driver
             driver = webdriver.Firefox(service=s, options=firefox_options)
             driver.get(comment.url)
 
-            
-
+            # find corrent html area to screenshot
             comment_html = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.XPATH, f"//*[@id=\"t1_{comment.id}-comment-rtjson-content\"]")))
             
+            # sometimes the comment isn't automatically open (will fix eventually)
             try:
                 comment_html.screenshot(f"{comments_folder_path}\\{comment.id}.png")
+                textToSpeech(comment.text, comments_folder_path, comment.id)
             except:
                 print(f"Error with {comment.id}")
 
             driver.close()
-
-
 
 #### Inputs : Name of Subreddit, Number of posts to collect, Number of comments to collect within each post
 #### Returns : List of Posts
@@ -86,16 +101,12 @@ def praw_script(subreddit_name, number_of_posts, number_of_comments):
 
     #### iterates through top posts of the month within subreddit
     for post in reddit.subreddit(subreddit_name).top(time_filter = 'month', limit=number_of_posts):
-        #print(post.title)
-        #print(post.url,"\n")
 
         comment_list = []
 
         #### iterates through comment section
         for comment in post.comments.list()[:number_of_comments]:
             comment_url = f"https://www.reddit.com/r/{post.subreddit.display_name}/comments/{post.id}/comment/{comment.id}/?utm_source=reddit&utm_medium=web2x&context=3"
-            print(comment_url)
-            print(comment.body,"\n")
 
             #### creates comment object with attributes of (comment text and comment url)
             comment_list.append(Comment(comment.body,comment.id, comment_url))
@@ -103,14 +114,48 @@ def praw_script(subreddit_name, number_of_posts, number_of_comments):
         #### creates list of posts with attributes (post title, post url, list of top comments from post)
         posts.append(RedditPost(post.title, post.url, post.id, comment_list))
     
-    print(posts)
+    #print(posts)
     return posts
-            
 
+def edit_video(posts):
+    print("GENERATING VIDEO")
+
+    for post in posts:
+        curTime = 0.0
+
+        #### Title
+        title = getTitle(post.title)
+
+        redditTitleAudio = AudioFileClip(f"{title}\\{post.id}.mp3")
+        redditTitleImage = ImageClip(f"{title}\\{post.id}.png").set_start(curTime).set_duration(redditTitleAudio.duration).set_pos(("center", "center"))
+
+        finalAudio = redditTitleAudio
+        finalVideo = redditTitleImage
+
+        curTime += redditTitleAudio.duration
+
+        for comment in post.comments:
+            if not os.path.isfile(f"{title}\{post.id}_screenshots\{comment.id}.mp3"):
+                continue
+
+            commentAudio = AudioFileClip(f"{title}\{post.id}_screenshots\{comment.id}.mp3")
+            commentTextImage = ImageClip(f"{title}\{post.id}_screenshots\{comment.id}.png").set_start(curTime).set_duration(commentAudio.duration).set_pos(("center", "center"))
+
+            curTime += commentAudio.duration
+
+            finalAudio = concatenate_audioclips([finalAudio, commentAudio])
+            finalVideo = concatenate_videoclips([finalVideo, commentTextImage])
+
+        minecraftVideo = VideoFileClip("C:\Users\vedan\OneDrive\Documents\Python\Over an Hour of clean Minecraft Parkour (No Falls Full Daytime Download in description).mp4").subclip(30,30+finalAudio.duration)
+        minecraftVideo.audioaudio = None
+
+        final = CompositeVideoClip([minecraftVideo, finalVideo.set_position('center', 'center')])
+        final.audio = finalAudio
+        final.write_videofile("combined.mp4")
 
 
 if __name__ == '__main__':
-    "Grab the whole screen"
-    import pyscreenshot as ImageGrab
+    list_of_posts = praw_script('askreddit',1,4)
+    collect_screenshots_and_audio_files(list_of_posts)
 
-    main()
+    edit_video(list_of_posts)
