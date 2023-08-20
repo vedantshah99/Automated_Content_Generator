@@ -72,11 +72,12 @@ def collect_screenshots_and_audio_files(posts):
             driver = webdriver.Firefox(service=s, options=firefox_options)
             driver.get(comment.url)
 
-            # find corrent html area to screenshot
-            comment_html = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.XPATH, f"//*[@id=\"t1_{comment.id}-comment-rtjson-content\"]")))
             
             # sometimes the comment isn't automatically open (will fix eventually)
             try:
+                # find corrent html area to screenshot
+                comment_html = WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.XPATH, f"//*[@id=\"t1_{comment.id}-comment-rtjson-content\"]")))
+
                 comment_html.screenshot(f"{comments_folder_path}\\{comment.id}.png")
                 textToSpeech(comment.text, comments_folder_path, comment.id)
             except:
@@ -113,11 +114,10 @@ def praw_script(subreddit_name, number_of_posts, number_of_comments):
         
         #### creates list of posts with attributes (post title, post url, list of top comments from post)
         posts.append(RedditPost(post.title, post.url, post.id, comment_list))
-    
-    #print(posts)
+
     return posts
 
-def edit_video(posts):
+def generate_video(posts):
     print("GENERATING VIDEO")
 
     for post in posts:
@@ -146,16 +146,18 @@ def edit_video(posts):
             finalAudio = concatenate_audioclips([finalAudio, commentAudio])
             finalVideo = concatenate_videoclips([finalVideo, commentTextImage])
 
-        minecraftVideo = VideoFileClip("C:\Users\vedan\OneDrive\Documents\Python\Over an Hour of clean Minecraft Parkour (No Falls Full Daytime Download in description).mp4").subclip(30,30+finalAudio.duration)
+        minecraftVideo = VideoFileClip("Over an Hour of clean Minecraft Parkour (No Falls Full Daytime Download in description).mp4").subclip(30,30+finalAudio.duration)
         minecraftVideo.audioaudio = None
 
         final = CompositeVideoClip([minecraftVideo, finalVideo.set_position('center', 'center')])
         final.audio = finalAudio
-        final.write_videofile("combined.mp4")
+        
+        if not os.path.isfile(f"final_videos\\{post.id}.mp4"):
+            final.write_videofile(f"final_videos\\{post.id}.mp4")
 
 
 if __name__ == '__main__':
     list_of_posts = praw_script('askreddit',1,4)
     collect_screenshots_and_audio_files(list_of_posts)
 
-    edit_video(list_of_posts)
+    generate_video(list_of_posts)
